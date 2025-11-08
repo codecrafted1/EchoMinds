@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EchoMind</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#0f1720; --muted:#94a3b8; --accent:#7c3aed; --bubble:#0b1220; --glass: rgba(255,255,255,0.03);
+    }
+    *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#05060a 0%, #071021 100%);color:#e6eef8}
+    .app{max-width:980px;margin:32px auto;height:80vh;display:grid;grid-template-columns:1fr 340px;gap:18px;padding:18px}
+    .chat-panel{background:linear-gradient(180deg,var(--panel),#08101a);border-radius:14px;padding:16px;display:flex;flex-direction:column;box-shadow:0 8px 24px rgba(2,6,23,0.6)}
+    .header{display:flex;align-items:center;gap:12px}
+    .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#2dd4bf);display:flex;align-items:center;justify-content:center;font-weight:700}
+    .title{font-size:18px}
+    .subtitle{font-size:12px;color:var(--muted)}
+    .messages{flex:1;overflow:auto;padding:12px;margin-top:12px;display:flex;flex-direction:column;gap:12px}
+    .input-area{display:flex;gap:8px;padding:12px;border-radius:10px;background:var(--glass);align-items:center}
+    textarea{flex:1;resize:none;background:transparent;border:1px solid rgba(255,255,255,0.03);padding:10px;border-radius:8px;color:inherit}
+    button{background:var(--accent);color:white;border:none;padding:10px 12px;border-radius:10px;cursor:pointer}
+    .controls{display:flex;gap:8px;align-items:center}
+
+    .bubble{max-width:78%;padding:10px 14px;border-radius:14px;line-height:1.3}
+    .user{align-self:flex-end;background:linear-gradient(90deg,#0b63ff,#7c3aed);border-radius:14px 14px 6px 14px}
+    .bot{align-self:flex-start;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.03)}
+    .meta{font-size:11px;color:var(--muted);margin-top:6px}
+
+    .sidebar{background:linear-gradient(180deg,#071026,#061021);border-radius:14px;padding:16px;color:var(--muted);box-shadow:0 8px 24px rgba(2,6,23,0.6)}
+    .panel-section{margin-bottom:12px}
+    .emotion-pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:999px;background:rgba(255,255,255,0.02)}
+    .small{font-size:13px;color:var(--muted)}
+    .mic{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.03);display:grid;place-items:center}
+    .status{font-size:12px;color:var(--muted);margin-top:8px}
+
+    @media(max-width:900px){.app{grid-template-columns:1fr; height:85vh}.sidebar{order:2}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="chat-panel">
+      <div class="header">
+        <div class="logo">EM</div>
+        <div>
+          <div class="title">EchoMind</div>
+          <div class="subtitle">emotion detection + voice recognition</div>
+        </div>
+      </div>
+
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <div style="margin-top:12px">
+        <div class="input-area">
+          <textarea id="input" rows="2" placeholder="Type a message... or press mic to speak"></textarea>
+          <div class="controls">
+            <div id="micBtn" class="mic" title="Start/Stop voice input">🎤</div>
+            <button id="sendBtn">Send</button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;align-items:center">
+<div class="small">Tip: Use Chrome for best voice support.</div>
+<div>
+            <button id="clearBtn" style="background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="panel-section">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>Current Emotion</strong></div>
+          <div id="currentEmotion" class="emotion-pill">😐 Neutral</div>
+        </div>
+        <div class="status" id="voiceStatus">Voice: idle</div>
+      </div>
+
+      <div class="panel-section">
+        <strong>Conversation Stats</strong>
+        <div class="small" id="stats">Messages: 0</div>
+      </div>
+
+      <div class="panel-section">
+        <strong>Controls</strong>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="ttsBtn">Speak last bot reply</button>
+        </div>
+      </div>
+
+      <div class="panel-section small">
+        <strong>How emotion detection works</strong>
+        <div style="margin-top:6px">This demo uses a lightweight keyword-based detector — good for quick tests. For production, plug a model (sentiment API / ML model).</div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+ 
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    const currentEmotionEl = document.getElementById('currentEmotion');
+    const statsEl = document.getElementById('stats');
+    const voiceStatusEl = document.getElementById('voiceStatus');
+    const ttsBtn = document.getElementById('ttsBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let conversation = JSON.parse(localStorage.getItem('echo_convo')||'[]');
+    let recognition = null; let recognizing = false; let lastBotReply='';
+
+ 
+    const EMOTION_KEYWORDS = {
+      joy: ['happy','glad','joy','joyful','excited','great','awesome','love','pleased','yay','hurray'],
+      sad: ['sad','unhappy','down','depressed','cry','lonely','miserable','sorrow','upset'],
+      angry: ['angry','mad','furious','annoyed','hate','irritated','pissed','rage'],
+      fear: ['scared','afraid','fear','anxious','nervous','worried','panic'],
+      surprise: ['surprised','wow','astonished','shocked','really?','no way'],
+      neutral: []
+    };
+
+    function detectEmotion(text){
+      const t = text.toLowerCase();
+      const scores = {joy:0,sad:0,angry:0,fear:0,surprise:0};
+      for(const [emo,words] of Object.entries(EMOTION_KEYWORDS)){
+        for(const w of words){ if(t.includes(w)) scores[emo] += 1; }
+      }
+ 
+      let top='neutral', topScore=0;
+      for(const k of Object.keys(scores)){ if(scores[k]>topScore){ top=k; topScore=scores[k]; }}
+      if(topScore===0) top='neutral';
+      return top;
+    }
+
+    function emotionToEmoji(emo){
+      return {joy:'😄',sad:'😢',angry:'😠',fear:'😨',surprise:'😲',neutral:'😐'}[emo]||'😐';
+    }
+
+    function addMessage(who,text,emotion){
+      const wrap = document.createElement('div');
+      const bubble = document.createElement('div');
+      bubble.className='bubble '+(who==='user'?'user':'bot');
+      bubble.innerHTML = text.replace(/\n/g,'<br>');
+      wrap.appendChild(bubble);
+      const meta = document.createElement('div'); meta.className='meta';
+      meta.textContent = (who==='user'? 'You' : 'EchoMind') + ' • ' + (new Date()).toLocaleTimeString();
+      wrap.appendChild(meta);
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      // update stats
+      statsEl.textContent = 'Messages: ' + conversation.length;
+      // set current emotion if bot
+      if(who==='bot'){
+        currentEmotionEl.textContent = emotionToEmoji(emotion) + ' ' + capitalize(emotion);
+      }
+    }
+
+    function capitalize(s){return s.charAt(0).toUpperCase()+s.slice(1)}
+
+    function saveAndRender(){
+      localStorage.setItem('echo_convo', JSON.stringify(conversation));
+      messagesEl.innerHTML='';
+      conversation.forEach(m=> addMessage(m.who, m.text, m.emotion||'neutral'));
+    }
+
+    // --- Simple bot reply (echo + emotion-aware) ---
+    function botReply(userText){
+      const emo = detectEmotion(userText);
+      const reply = generateReply(userText, emo);
+      const botMsg = {who:'bot', text:reply, emotion:emo, ts:Date.now()};
+      conversation.push({who:'bot', text:reply, emotion:emo, ts:Date.now()});
+      lastBotReply = reply;
+      saveAndRender();
+    }
+
+    function generateReply(text, emotion){
+      // friendly echo responses; replace with API call for smarter replies
+      const base = {
+        joy: ["That's wonderful to hear! Tell me more.", "Yay — sounds like things are going well 😊"],
+        sad: ["I'm sorry you're feeling that way. Want to talk about it?", "That sounds tough. I'm here to listen."] ,
+        angry: ["I hear your frustration. Want to vent?", "That's irritating — do you want strategies to calm down?"],
+        fear: ["That must feel worrying. Breathe — want a grounding exercise?", "I understand — do you want to break it down together?"],
+        surprise: ["Oh wow! Tell me more.", "Surprising, huh — what's the full story?"],
+        neutral: ["Hmm, tell me more.", "Okay. What else?"]
+      };
+      const choices = base[emotion] || base['neutral'];
+      const pick = choices[Math.floor(Math.random()*choices.length)];
+      return pick + '\n(You said: "' + text.slice(0,240) + (text.length>240?'...':'')+ '")';
+    }
+
+    // --- Send flow ---
+    sendBtn.addEventListener('click', ()=>{
+      const val = inputEl.value.trim(); if(!val) return;
+      const emo = detectEmotion(val);
+      const userMsg = {who:'user', text:val, emotion:emo, ts:Date.now()};
+      conversation.push(userMsg);
+      inputEl.value='';
+      saveAndRender();
+      // small delay then bot reply
+      setTimeout(()=> botReply(val), 600 + Math.random()*700);
+    });
+
+    inputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendBtn.click(); } });
+
+    clearBtn.addEventListener('click', ()=>{ if(confirm('Clear conversation?')){ conversation=[]; localStorage.removeItem('echo_convo'); saveAndRender(); }});
+
+    // --- Voice to text using Web Speech API ---
+    function initRecognition(){
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if(!SpeechRecognition) { voiceStatusEl.textContent = 'Voice: not supported in this browser'; micBtn.style.opacity=0.5; return; }
+      recognition = new SpeechRecognition(); recognition.lang='en-IN'; recognition.interimResults=true; recognition.continuous=false;
+
+      recognition.onstart = ()=>{ recognizing=true; voiceStatusEl.textContent='Voice: listening...'; micBtn.textContent='🔴'; };
+      recognition.onend = ()=>{ recognizing=false; voiceStatusEl.textContent='Voice: idle'; micBtn.textContent='🎤'; };
+      recognition.onerror = (ev)=>{ voiceStatusEl.textContent='Voice error: ' + (ev.error||'unknown'); recognizing=false; micBtn.textContent='🎤'; }
+      recognition.onresult = (ev)=>{
+        let interim=''; let final='';
+        for(let i=0;i<ev.results.length;i++){
+          const r = ev.results[i]; if(r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
+        }
+        inputEl.value = (final || interim).trim();
+        // if final text, auto send
+        if(final){ sendBtn.click(); }
+      };
+    }
+
+    micBtn.addEventListener('click', ()=>{
+      if(!recognition) return;
+      if(!recognizing){ try{ recognition.start(); }catch(e){ console.warn(e); } }
+      else recognition.stop();
+    });
+
+    // --- Text to speech ---
+    function speak(text){ if(!window.speechSynthesis) { alert('TTS not supported in this browser'); return; }
+      const u = new SpeechSynthesisUtterance(text); u.lang='en-US'; u.rate=1; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    }
+
+    ttsBtn.addEventListener('click', ()=>{ if(!lastBotReply) return alert('No bot reply yet'); speak(lastBotReply); });
+
+    // --- Boot ---
+    (function(){
+      initRecognition(); saveAndRender();
+      // preload a friendly bot greeting if empty
+      if(conversation.length===0){ const g = {who:'bot', text:'Hi — I\'m EchoMind. How are you feeling today?', emotion:'neutral', ts:Date.now()}; conversation.push(g); lastBotReply=g.text; saveAndRender(); }
+    })();
+
+    // --- Accessibility: announce emotion after each bot message ---
+    const observer = new MutationObserver(()=>{
+      const last = conversation.filter(m=>m.who==='bot').slice(-1)[0];
+      if(last){ const emo=last.emotion||'neutral'; const ann = 'Bot replied. Detected emotion: ' + emo + '.'; const a = new SpeechSynthesisUtterance(ann); a.lang='en-US'; a.rate=1; try{ window.speechSynthesis.speak(a);}catch(e){}
+    }});
+    observer.observe(messagesEl,{childList:true, subtree:true});
+  </script>
+</body>
+</html>
